@@ -1,5 +1,5 @@
 # IDF-Ecuador-basado-en-INAMHI-2019-CC
-
+"Descargar", guardar y abrir el HTML: Clima Ecuador
 Visualizador de IDF histórica del Ecuador. Constrasta los valores históricos con dos GCM CMIP5
 COntiene las IDF históricas de INAMHI 2019, dos modelos genéricos de CMIP6 de alta resolución, se recomienda correr para cada estación el mejor modelo RMSE
 
