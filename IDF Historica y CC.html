@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clima Ecuador IDF - Visualizador de Intensidades Extrems</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+:root {
+ --primary: #0f172a; --accent: #10b981; --secondary: #8b5cf6; --bg: #f8fafc; --white: #ffffff; }
+        body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--primary); margin: 0; padding: 20px; }
+        .container { max-width: 1300px; margin: auto; display: grid; grid-template-columns: 380px 1fr; gap: 25px; }
+        .panel { background: var(--white); padding: 30px; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.05); }
+        h2 { color: var(--primary); font-size: 1.2rem; border-left: 4px solid var(--secondary); padding-left: 10px; margin-bottom: 25px; }
+        .input-group { margin-bottom: 20px; }
+        label { display: blzock; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; color: #64748b; margin-bottom: 8px; }
+        select, input { width: 100%; padding: 12px; border: 1px solid #e2e8f0; border-radius: 8px; background: #f1f5f9; }
+        .btn { background: var(--primary); color: white; border: none; padding: 14px; width: 100%; border-radius: 8px; cursor: pointer; font-weight: bold; transition: 0.3s; margin-top: 10px; }
+        .btn:hover { background: var(--secondary); }
+
+        .stats { margin-top: 20px; padding: 15px; background: #fff5f5; border-radius: 8px; border-left: 4px solid var(--accent); }
+        .gee-link { display: block; margin-top: 15px; text-align: center; color: #3182ce; text-decoration: none; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="panel">
+        <h2>Clima Ecuador</h2>
+        <div class="input-group">
+            <label>Estación INAMHI (72 Disponibles):</label>
+            <select id="estacion" onchange="actualizarSimulacion()"></select>
+        </div>
+        <div class="input-group">
+            <label>Periodo de Retorno (T en años):</label>
+            <input type="number" id="tr" value="50" min="2" max="500">
+        </div>
+        <div class="input-group">
+            <label>Escenario Cambio Climático:</label>
+            <select id="escenario" onchange="actualizarSimulacion()">
+                <option value="1.00">Histórico (Línea Base)</option>
+                <option value="1.07" selected>SSP5-8.5 (MIROC6 - Crítico)</option>
+                <option value="0.96">SSP2-4.5 (MPI-ESM1-2-HR - Máximo RC)</option>
+            </select>
+        </div>
+        <button class="btn" onclick="actualizarSimulacion()">CALCULAR IMPACTO</button>
+
+        <div id="resultado" class="stats">
+            Seleccione parámetros para ver el incremento.
+        </div>
+        
+        <a href="https://diegoquishpelandeta.users.earthengine.app/view/tormentas-ec-2060" target="_blank" class="gee-link">🛰️ Abrir Visualizador GEE 1KM</a>
+    </div>
+
+    <div class="panel">
+        <canvas id="idfChart" style="height: 450px;"></canvas>
+    </div>
+</div>
+
+<script>
+// --- 1. BASE DE DATOS MAESTRA (72 ESTACIONES) ---
+const DB = {
+    // --- PICHINCHA ---
+    "M0002": { n: "LA TOLA", p: "PICHINCHA", eq: [{t: 20, a: 106.539, b: 0.231, c: -0.2356}, {t: 120, a: 433.713, b: 0.1955, c: -0.6909}, {t: 1440, a: 1433.65, b: 0.1822, c: -0.82}] },
+    "M0003": { n: "IZOBAMBA", p: "PICHINCHA", eq: [{t: 30, a: 164.212, b: 0.165, c: -0.4326}, {t: 120, a: 371.072, b: 0.1575, c: -0.6771}, {t: 1440, a: 929.503, b: 0.1614, c: -0.8773}] },
+    "M0004": { n: "RUMIPAMBA", p: "PICHINCHA", eq: [{t: 30, a: 160.916, b: 0.2407, c: -0.4893}, {t: 120, a: 506.391, b: 0.2125, c: -0.805}, {t: 1440, a: 1034.08, b: 0.1797, c: -0.9377}] },
+    "M0022": { n: "TABACUNDO", p: "PICHINCHA", eq: [{t: 30, a: 176.432, b: 0.1261, c: -0.4508}, {t: 120, a: 956.730, b: 0.0748, c: -0.8911}, {t: 1440, a: 987.971, b: 0.0648, c: -0.91}] },
+    "M0024": { n: "IÑAQUITO", p: "PICHINCHA", eq: [{t: 30, a: 141.772, b: 0.2071, c: -0.3804}, {t: 120, a: 418.754, b: 0.2196, c: -0.721}, {t: 1440, a: 1276.81, b: 0.1681, c: -0.9297}] },
+    "M0054": { n: "QUITO OBSERVATORIO", p: "PICHINCHA", eq: [{t: 30, a: 187.208, b: 0.1444, c: -0.4379}, {t: 120, a: 607.923, b: 0.1447, c: -0.7845}, {t: 1440, a: 1260.02, b: 0.1325, c: -0.9221}] },
+    "M1205": { n: "SANGOLQUÍ", p: "PICHINCHA", eq: [{t: 120, a: 185.22, b: 0.145, c: -0.485}, {t: 1440, a: 920.15, b: 0.145, c: -0.812}] },
+
+    // --- GUAYAS / SANTA ELENA / LOS RÍOS ---
+    "M0056": { n: "GUAYAQUIL AEROPUERTO", p: "GUAYAS", eq: [{t: 30, a: 135.775, b: 0.2169, c: -0.3063}, {t: 120, a: 203.026, b: 0.2169, c: -0.4171}, {t: 1440, a: 1113.45, b: 0.2169, c: -0.773}] },
+    "M0037": { n: "MILAGRO", p: "GUAYAS", eq: [{t: 120, a: 204.065, b: 0.2064, c: -0.373}, {t: 1440, a: 1777.31, b: 0.2045, c: -0.8442}] },
+    "M0108": { n: "SALINAS", p: "SANTA ELENA", eq: [{t: 120, a: 110.12, b: 0.3521, c: -0.5851}, {t: 1440, a: 650.12, b: 0.3521, c: -0.8951}] },
+    "M0051": { n: "BABAHOYO", p: "LOS RÍOS", eq: [{t: 60, a: 161.467, b: 0.26, c: -0.2744}, {t: 1440, a: 1639.14, b: 0.2267, c: -0.8115}] },
+    "M0053": { n: "QUEVEDO", p: "LOS RÍOS", eq: [{t: 120, a: 205.42, b: 0.2412, c: -0.4851}, {t: 1440, a: 1150.22, b: 0.2412, c: -0.8251}] },
+    "M0006": { n: "PICHILINGUE", p: "LOS RÍOS", eq: [{t: 30, a: 224.541, b: 0.1187, c: -0.3463}, {t: 120, a: 331.06, b: 0.1548, c: -0.4804}, {t: 1440, a: 3549.19, b: 0.143, c: -0.9153}] },
+
+    // --- MANABÍ / ESMERALDAS ---
+    "M0005": { n: "PORTOVIEJO", p: "MANABÍ", eq: [{t: 120, a: 175.897, b: 0.2692, c: -0.5042}, {t: 1440, a: 891.12, b: 0.2424, c: -0.8418}] },
+    "M0162": { n: "CHONE", p: "MANABÍ", eq: [{t: 30, a: 105.1, b: 0.2806, c: -0.3121}, {t: 120, a: 261.812, b: 0.3179, c: -0.6552}, {t: 1440, a: 705.414, b: 0.2716, c: -0.7985}] },
+    "M0105": { n: "MANTA AEROPUERTO", p: "MANABÍ", eq: [{t: 120, a: 142.152, b: 0.3122, c: -0.5211}, {t: 1440, a: 785.12, b: 0.3122, c: -0.8542}] },
+    "M0169": { n: "JULCUY", p: "MANABÍ", eq: [{t: 30, a: 161.6, b: 0.2087, c: -0.4192}, {t: 120, a: 302.56, b: 0.2098, c: -0.6122}, {t: 1440, a: 1043.32, b: 0.2669, c: -0.8892}] },
+    "M0058": { n: "ESMERALDAS TACHINA", p: "ESMERALDAS", eq: [{t: 60, a: 111.41, b: 0.234, c: -0.287}, {t: 1440, a: 847.88, b: 0.2124, c: -0.7776}] },
+
+    // --- AZUAY / CAÑAR / LOJA ---
+    "M0138": { n: "PAUTE", p: "AZUAY", eq: [{t: 30, a: 103.212, b: 0.262, c: -0.3919}, {t: 120, a: 262.057, b: 0.2563, c: -0.6679}, {t: 1440, a: 719.77, b: 0.2543, c: -0.8795}] },
+    "M0122": { n: "CUENCA AEROPUERTO", p: "AZUAY", eq: [{t: 30, a: 144.208, b: 0.1504, c: -0.4552}, {t: 120, a: 343.321, b: 0.1186, c: -0.7107}, {t: 1440, a: 699.034, b: 0.1206, c: -0.8576}] },
+    "M0139": { n: "GUALACEO", p: "AZUAY", eq: [{t: 30, a: 163.333, b: 0.1753, c: -0.4333}, {t: 120, a: 374.606, b: 0.1845, c: -0.6853}, {t: 1440, a: 1406.35, b: 0.1642, c: -0.9557}] },
+    "M0031": { n: "CAÑAR", p: "CAÑAR", eq: [{t: 30, a: 114.851, b: 0.2527, c: -0.6183}, {t: 120, a: 227.986, b: 0.1887, c: -0.7724}, {t: 1440, a: 282.71, b: 0.177, c: -0.8082}] },
+    "M0160": { n: "AZOGUES", p: "CAÑAR", eq: [{t: 120, a: 142.12, b: 0.155, c: -0.495}, {t: 1440, a: 720.45, b: 0.155, c: -0.825}] },
+    "M0033": { n: "LOJA LA ARGELIA", p: "LOJA", eq: [{t: 30, a: 138.033, b: 0.1922, c: -0.446}, {t: 120, a: 334.481, b: 0.1877, c: -0.6954}, {t: 1440, a: 566.052, b: 0.1627, c: -0.7974}] },
+    "M0065": { n: "MACARÁ", p: "LOJA", eq: [{t: 30, a: 175.594, b: 0.2055, c: -0.443}, {t: 120, a: 232.299, b: 0.2137, c: -0.5213}, {t: 1440, a: 985.956, b: 0.1839, c: -0.8068}] },
+    "M0043": { n: "CATACOCHA", p: "LOJA", eq: [{t: 120, a: 165.12, b: 0.155, c: -0.512}, {t: 1440, a: 810.45, b: 0.155, c: -0.835}] },
+
+    // --- COTOPAXI / TUNGURAHUA / CHIMBORAZO / BOLÍVAR ---
+    "M0064": { n: "LATACUNGA AEROPUERTO", p: "COTOPAXI", eq: [{t: 10, a: 166.04, b: 0.1317, c: -0.4919}, {t: 120, a: 186.774, b: 0.1798, c: -0.5625}, {t: 1440, a: 322.599, b: 0.2399, c: -0.7993}] },
+    "M0030": { n: "SALCEDO", p: "COTOPAXI", eq: [{t: 120, a: 135.22, b: 0.142, c: -0.452}, {t: 1440, a: 780.11, b: 0.142, c: -0.815}] },
+    "M0066": { n: "AMBATO AEROPUERTO", p: "TUNGURAHUA", eq: [{t: 30, a: 95.703, b: 0.2644, c: -0.5192}, {t: 120, a: 226.883, b: 0.2204, c: -0.7568}, {t: 1440, a: 438.041, b: 0.1712, c: -0.8664}] },
+    "M0013": { n: "AMBATO OBS.", p: "TUNGURAHUA", eq: [{t: 120, a: 125.45, b: 0.1521, c: -0.4121}, {t: 1440, a: 850.12, b: 0.1521, c: -0.8325}] },
+    "M0029": { n: "BAÑOS", p: "TUNGURAHUA", eq: [{t: 120, a: 69.511, b: 0.176, c: -0.492}, {t: 1440, a: 69.935, b: 0.158, c: -0.483}] },
+    "M0057": { n: "RIOBAMBA AEROPUERTO", p: "CHIMBORAZO", eq: [{t: 30, a: 131.53, b: 0.207, c: -0.5414}, {t: 120, a: 280.338, b: 0.1894, c: -0.7605}, {t: 1440, a: 563.875, b: 0.1551, c: -0.8814}] },
+    "M1036": { n: "RIOBAMBA ESPOCH", p: "CHIMBORAZO", eq: [{t: 30, a: 156.38, b: 0.2102, c: -0.4735}, {t: 120, a: 541.519, b: 0.2061, c: -0.8382}, {t: 1440, a: 708.125, b: 0.1841, c: -0.8822}] },
+    "M0150": { n: "GUARANDA", p: "BOLÍVAR", eq: [{t: 120, a: 155.45, b: 0.165, c: -0.475}, {t: 1440, a: 850.12, b: 0.165, c: -0.815}] },
+
+    // --- IMBABURA / CARCHI / S.D. TSACHILAS ---
+    "M0101": { n: "IBARRA AEROPUERTO", p: "IMBABURA", eq: [{t: 30, a: 163.981, b: 0.1746, c: -0.549}, {t: 120, a: 235.822, b: 0.1642, c: -0.6361}, {t: 1440, a: 629.21, b: 0.2196, c: -0.8701}] },
+    "M0102": { n: "OTAVALO", p: "IMBABURA", eq: [{t: 120, a: 145.12, b: 0.135, c: -0.462}, {t: 1440, a: 790.45, b: 0.135, c: -0.825}] },
+    "M0059": { n: "TULCÁN AEROPUERTO", p: "CARCHI", eq: [{t: 30, a: 118.756, b: 0.1839, c: -0.3182}, {t: 120, a: 547.667, b: 0.2127, c: -0.7926}, {t: 1440, a: 877.0, b: 0.1746, c: -0.8742}] },
+    "M0135": { n: "SAN GABRIEL", p: "CARCHI", eq: [{t: 120, a: 138.22, b: 0.122, c: -0.465}, {t: 1440, a: 610.12, b: 0.122, c: -0.795}] },
+    "M0100": { n: "SANTO DOMINGO", p: "S.D. TSACHILAS", eq: [{t: 120, a: 245.22, b: 0.185, c: -0.445}, {t: 1440, a: 1350.12, b: 0.185, c: -0.795}] },
+
+    // --- ORIENTE (PASTAZA / NAPO / SUCUMBÍOS / MORONA / ORELLANA / ZAMORA) ---
+    "M0008": { n: "PUYO", p: "PASTAZA", eq: [{t: 120, a: 279.762, b: 0.1201, c: -0.4262}, {t: 1440, a: 1610.14, b: 0.1334, c: -0.8093}] },
+    "M0063": { n: "PASTAZA AEROPUERTO", p: "PASTAZA", eq: [{t: 120, a: 200.985, b: 0.175, c: -0.3596}, {t: 1440, a: 1722.67, b: 0.1852, c: -0.8411}] },
+    "M0203": { n: "EL REVENTADOR", p: "NAPO", eq: [{t: 20, a: 168.425, b: 0.1628, c: -0.2045}, {t: 120, a: 336.018, b: 0.1489, c: -0.5072}, {t: 1440, a: 981.031, b: 0.1745, c: -0.7403}] },
+    "M0070": { n: "TENA HDA. CHAUPISHUNGO", p: "NAPO", eq: [{t: 20, a: 116.326, b: 0.1968, c: -0.1415}, {t: 60, a: 389.35, b: 0.1915, c: -0.5444}, {t: 1440, a: 992.647, b: 0.1581, c: -0.7521}] },
+    "M0010": { n: "TENA OBS.", p: "NAPO", eq: [{t: 120, a: 255.12, b: 0.1451, c: -0.4412}, {t: 1440, a: 1540.22, b: 0.1451, c: -0.8123}] },
+    "M0038": { n: "LAGO AGRIO", p: "SUCUMBÍOS", eq: [{t: 120, a: 265.45, b: 0.1321, c: -0.4125}, {t: 1440, a: 1680.55, b: 0.1321, c: -0.7952}] },
+    "M0062": { n: "MACAS AEROPUERTO", p: "MORONA SANTIAGO", eq: [{t: 30, a: 125.599, b: 0.2276, c: -0.2881}, {t: 120, a: 513.621, b: 0.2112, c: -0.6962}, {t: 1440, a: 1116.63, b: 0.1747, c: -0.8301}] },
+    "M0079": { n: "SUCÚA", p: "MORONA SANTIAGO", eq: [{t: 30, a: 275.365, b: 0.0766, c: -0.5412}, {t: 120, a: 412.227, b: 0.084, c: -0.6608}, {t: 1440, a: 1075.45, b: 0.0909, c: -0.8626}] },
+    "M0007": { n: "NUEVO ROCAFUERTE", p: "ORELLANA", eq: [{t: 30, a: 195.256, b: 0.1442, c: -0.3089}, {t: 120, a: 549.076, b: 0.1376, c: -0.6206}, {t: 1440, a: 1654.42, b: 0.1371, c: -0.8493}] },
+    "M0293": { n: "PALMORIENTE", p: "ORELLANA", eq: [{t: 120, a: 668.8, b: 0.1971, c: -0.8529}, {t: 1440, a: 2532.89, b: 0.1387, c: -0.9023}] },
+    "M0037_Z": { n: "ZAMORA", p: "ZAMORA CHINCHIPE", eq: [{t: 120, a: 235.45, b: 0.115, c: -0.421}, {t: 1440, a: 1380.55, b: 0.115, c: -0.795}] },
+
+    // --- EL ORO / GALÁPAGOS / OTROS ---
+    "M0072": { n: "MACHALA AEROPUERTO", p: "EL ORO", eq: [{t: 30, a: 154.287, b: 0.2345, c: -0.2966}, {t: 120, a: 396.2, b: 0.2109, c: -0.5598}, {t: 1440, a: 1491.62, b: 0.2086, c: -0.8249}] },
+    "M0077": { n: "SANTA ROSA", p: "EL ORO", eq: [{t: 120, a: 185.12, b: 0.2852, c: -0.5123}, {t: 1440, a: 990.15, b: 0.2852, c: -0.8451}] },
+    "M0040_O": { n: "PASAJE", p: "EL ORO", eq: [{t: 10, a: 204.195, b: 0.1961, c: -0.5466}, {t: 120, a: 146.625, b: 0.2233, c: -0.4013}, {t: 1440, a: 1072.48, b: 0.2209, c: -0.8244}] },
+    "M0221": { n: "SAN CRISTÓBAL", p: "GALÁPAGOS", eq: [{t: 120, a: 99.784, b: 0.2536, c: -0.3417}, {t: 1440, a: 734.33, b: 0.3077, c: -0.7719}] },
+    "M0039": { n: "BUCAY", p: "GUAYAS", eq: [{t: 120, a: 323.69, b: 0.1053, c: -0.4793}, {t: 1440, a: 1155.52, b: 0.1468, c: -0.7546}] }
+
+    // Aquí puedes pegar el resto de las 72 estaciones compartidas anteriormente...
+};
+
+// Cargar select de estaciones
+const select = document.getElementById('estacion');
+for (const id in DB) {
+    let opt = document.createElement('option');
+    opt.value = id;
+    opt.innerHTML = `${id} - ${DB[id].n}`;
+    select.appendChild(opt);
+}
+
+let chartInstance = null;
+
+// --- 2. MOTOR DE CÁLCULO IDF ---
+function calcularI(id, T, d) {
+    const st = DB[id];
+    let params = st.eq[st.eq.length - 1]; // Por defecto el último intervalo
+    for (let e of st.eq) {
+        if (d <= e.t) { params = e; break; }
+    }
+    return params.a * Math.pow(T, params.b) * Math.pow(d, params.c);
+}
+
+// --- 3. LÓGICA DE ACTUALIZACIÓN ---
+function actualizarSimulacion() {
+    const id = document.getElementById('estacion').value;
+    const T = parseFloat(document.getElementById('tr').value);
+    const RC = parseFloat(document.getElementById('escenario').value);
+    
+    const duraciones = [5, 10, 15, 30, 60, 120, 360, 720, 1440];
+    const intensidadesHist = duraciones.map(d => calcularI(id, T, d));
+    const intensidadesFut = intensidadesHist.map(i => i * RC);
+
+    // Actualizar Texto de Resultados
+    const incremento = ((RC - 1) * 100).toFixed(1);
+    document.getElementById('resultado').innerHTML = `
+        <strong>Estación:</strong> ${DB[id].n}<br>
+        <strong>Incremento CC:</strong> +${incremento}%<br>
+        <strong>I Max (60 min):</strong> ${(intensidadesFut[4]).toFixed(2)} mm/h
+    `;
+
+    dibujarGrafico(duraciones, intensidadesHist, intensidadesFut, T);
+}
+
+// --- 4. RENDERIZADO DE GRÁFICO (CHART.JS) ---
+function dibujarGrafico(labels, dataHist, dataFut, T) {
+    const ctx = document.getElementById('idfChart').getContext('2d');
+    if (chartInstance) chartInstance.destroy();
+
+    chartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: `Histórico (T=${T} años)`,
+                    data: dataHist,
+                    borderColor: '#2d3748',
+                    borderDash: [5, 5],
+                    tension: 0.4
+                },
+                {
+                    label: ` Clima Futuro (SSP)`,
+                    data: dataFut,
+                    borderColor: '#8b5cf6',
+                    backgroundColor: 'rgba(139, 92, 246, 0.1)',
+                    fill: true,
+                    tension: 0.4,
+                    borderWidth: 3
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                x: { title: { display: true, text: 'Duración (minutos)' } },
+                y: { title: { display: true, text: 'Intensidad (mm/h)' } }
+            }
+        }
+    });
+}
+
+// Inicio
+actualizarSimulacion();
+</script>
+
+</body>
+</html>
